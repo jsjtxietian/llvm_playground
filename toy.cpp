@@ -1,3 +1,4 @@
+#include "KaleidoscopeJIT.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/BasicBlock.h"
@@ -6,12 +7,19 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
-
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
 #include <algorithm>
+#include <cassert>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -20,6 +28,7 @@
 #include <vector>
 
 using namespace llvm;
+using namespace llvm::orc;
 
 //===----------------------------------------------------------------------===//
 // Lexer
@@ -112,7 +121,6 @@ namespace
 	public:
 		virtual ~ExprAST() = default;
 
-		// represent a “Static Single Assignment (SSA) register” or “SSA value” in LLVM.
 		virtual Value *codegen() = 0;
 	};
 
@@ -434,19 +442,14 @@ static std::unique_ptr<PrototypeAST> ParseExtern()
 // Code Generation
 //===----------------------------------------------------------------------===//
 
-// TheContext is an opaque object that owns a lot of core LLVM data structures,
-// such as the type and constant value tables.
-static std::unique_ptr<LLVMContext> TheContext;
-// contains functions and global variables.
-// In many ways, it is the top-level structure that the LLVM IR uses to contain code.
-// It will own the memory for all of the IR that we generate,
+static LLVMContext TheContext;
+static IRBuilder<> Builder(TheContext);
 static std::unique_ptr<Module> TheModule;
-// a helper object that makes it easy to generate LLVM instructions.
-// Instances of the IRBuilder class template keep track of the current place to insert instructions and has methods to create new instructions.
-static std::unique_ptr<IRBuilder<>> Builder;
-// keeps track of which values are defined in the current scope and what their LLVM representation is.
-// (In other words, it is a symbol table for the code).
 static std::map<std::string, Value *> NamedValues;
+static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
+static std::unique_ptr<KaleidoscopeJIT> TheJIT;
+// holds the most recent prototype for each function
+static std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
 
 Value *LogErrorV(const char *Str)
 {
@@ -454,10 +457,26 @@ Value *LogErrorV(const char *Str)
 	return nullptr;
 }
 
+// replace calls to TheModule->getFunction()
+Function *getFunction(std::string Name)
+{
+	// First, see if the function has already been added to the current module.
+	if (auto *F = TheModule->getFunction(Name))
+		return F;
+
+	// If not, check whether we can codegen the declaration from some existing
+	// prototype.
+	auto FI = FunctionProtos.find(Name);
+	if (FI != FunctionProtos.end())
+		return FI->second->codegen();
+
+	// If no existing prototype exists, return null.
+	return nullptr;
+}
+
 Value *NumberExprAST::codegen()
 {
-	// APFloat has the capability of holding floating point constants of Arbitrary Precision
-	return ConstantFP::get(*TheContext, APFloat(Val));
+	return ConstantFP::get(TheContext, APFloat(Val));
 }
 
 Value *VariableExprAST::codegen()
@@ -479,16 +498,15 @@ Value *BinaryExprAST::codegen()
 	switch (Op)
 	{
 	case '+':
-		return Builder->CreateFAdd(L, R, "addtmp");
+		return Builder.CreateFAdd(L, R, "addtmp");
 	case '-':
-		return Builder->CreateFSub(L, R, "subtmp");
+		return Builder.CreateFSub(L, R, "subtmp");
 	case '*':
-		return Builder->CreateFMul(L, R, "multmp");
+		return Builder.CreateFMul(L, R, "multmp");
 	case '<':
-		// fcmp instruction always returns an ‘i1’ value (a one bit integer)
-		L = Builder->CreateFCmpULT(L, R, "cmptmp");
+		L = Builder.CreateFCmpULT(L, R, "cmptmp");
 		// Convert bool 0/1 to double 0.0 or 1.0
-		return Builder->CreateUIToFP(L, Type::getDoubleTy(*TheContext), "booltmp");
+		return Builder.CreateUIToFP(L, Type::getDoubleTy(TheContext), "booltmp");
 	default:
 		return LogErrorV("invalid binary operator");
 	}
@@ -497,7 +515,7 @@ Value *BinaryExprAST::codegen()
 Value *CallExprAST::codegen()
 {
 	// Look up the name in the global module table.
-	Function *CalleeF = TheModule->getFunction(Callee);
+	Function *CalleeF = getFunction(Callee);
 	if (!CalleeF)
 		return LogErrorV("Unknown function referenced");
 
@@ -513,20 +531,15 @@ Value *CallExprAST::codegen()
 			return nullptr;
 	}
 
-	return Builder->CreateCall(CalleeF, ArgsV, "calltmp");
+	return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
 }
 
 Function *PrototypeAST::codegen()
 {
 	// Make the function type:  double(double,double) etc.
-	// creates a vector of “N” LLVM double types
-	std::vector<Type *> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
-	// create a function type that takes “N” doubles as arguments,
-	// returns one double as a result,
-	// and that is not vararg (the false parameter indicates this).
-	// you don’t “new” a type, you “get” it.
+	std::vector<Type *> Doubles(Args.size(), Type::getDoubleTy(TheContext));
 	FunctionType *FT =
-		FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
+		FunctionType::get(Type::getDoubleTy(TheContext), Doubles, false);
 
 	Function *F =
 		Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
@@ -541,34 +554,33 @@ Function *PrototypeAST::codegen()
 
 Function *FunctionAST::codegen()
 {
-	// First, check for an existing function from a previous 'extern' declaration.
-	// If Module::getFunction returns null then no previous version exists, so we’ll codegen one from the Prototype.
-	Function *TheFunction = TheModule->getFunction(Proto->getName());
-
-	if (!TheFunction)
-		TheFunction = Proto->codegen();
-
+	// Transfer ownership of the prototype to the FunctionProtos map, but keep a
+	// reference to it for use below.
+	auto &P = *Proto;
+	FunctionProtos[Proto->getName()] = std::move(Proto);
+	Function *TheFunction = getFunction(P.getName());
 	if (!TheFunction)
 		return nullptr;
 
 	// Create a new basic block to start insertion into.
-	BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunction);
-	// new instructions should be inserted into the end of the new basic block
-	Builder->SetInsertPoint(BB);
+	BasicBlock *BB = BasicBlock::Create(TheContext, "entry", TheFunction);
+	Builder.SetInsertPoint(BB);
 
 	// Record the function arguments in the NamedValues map.
-	// so that they’re accessible to VariableExprAST nodes.
 	NamedValues.clear();
 	for (auto &Arg : TheFunction->args())
-		NamedValues[std::string(Arg.getName())] = &Arg;
+		NamedValues[Arg.getName()] = &Arg;
 
 	if (Value *RetVal = Body->codegen())
 	{
 		// Finish off the function.
-		Builder->CreateRet(RetVal);
+		Builder.CreateRet(RetVal);
 
 		// Validate the generated code, checking for consistency.
 		verifyFunction(*TheFunction);
+
+		// Run the optimizer on the function.
+		TheFPM->run(*TheFunction);
 
 		return TheFunction;
 	}
@@ -582,14 +594,25 @@ Function *FunctionAST::codegen()
 // Top-Level parsing and JIT Driver
 //===----------------------------------------------------------------------===//
 
-static void InitializeModule()
+static void InitializeModuleAndPassManager()
 {
-	// Open a new context and module.
-	TheContext = std::make_unique<LLVMContext>();
-	TheModule = std::make_unique<Module>("my cool jit", *TheContext);
+	// Open a new module.
+	TheModule = std::make_unique<Module>("my cool jit", TheContext);
+	TheModule->setDataLayout(TheJIT->getTargetMachine().createDataLayout());
 
-	// Create a new builder for the module.
-	Builder = std::make_unique<IRBuilder<>>(*TheContext);
+	// Create a new pass manager attached to it.
+	TheFPM = std::make_unique<legacy::FunctionPassManager>(TheModule.get());
+
+	// Do simple "peephole" optimizations and bit-twiddling optzns.
+	TheFPM->add(createInstructionCombiningPass());
+	// Reassociate expressions.
+	TheFPM->add(createReassociatePass());
+	// Eliminate Common SubExpressions.
+	TheFPM->add(createGVNPass());
+	// Simplify the control flow graph (deleting unreachable blocks, etc).
+	TheFPM->add(createCFGSimplificationPass());
+
+	TheFPM->doInitialization();
 }
 
 static void HandleDefinition()
@@ -601,6 +624,8 @@ static void HandleDefinition()
 			fprintf(stderr, "Read function definition:");
 			FnIR->print(errs());
 			fprintf(stderr, "\n");
+			TheJIT->addModule(std::move(TheModule));
+			InitializeModuleAndPassManager();
 		}
 	}
 	else
@@ -619,6 +644,7 @@ static void HandleExtern()
 			fprintf(stderr, "Read extern: ");
 			FnIR->print(errs());
 			fprintf(stderr, "\n");
+			FunctionProtos[ProtoAST->getName()] = std::move(ProtoAST);
 		}
 	}
 	else
@@ -633,14 +659,24 @@ static void HandleTopLevelExpression()
 	// Evaluate a top-level expression into an anonymous function.
 	if (auto FnAST = ParseTopLevelExpr())
 	{
-		if (auto *FnIR = FnAST->codegen())
+		if (FnAST->codegen())
 		{
-			fprintf(stderr, "Read top-level expression:");
-			FnIR->print(errs());
-			fprintf(stderr, "\n");
+			// JIT the module containing the anonymous expression, keeping a handle so
+			// we can free it later.
+			auto H = TheJIT->addModule(std::move(TheModule));
+			InitializeModuleAndPassManager();
 
-			// Remove the anonymous expression.
-			FnIR->eraseFromParent();
+			// Search the JIT for the __anon_expr symbol.
+			auto ExprSymbol = TheJIT->findSymbol("__anon_expr");
+			assert(ExprSymbol && "Function not found");
+
+			// Get the symbol's address and cast it to the right type (takes no
+			// arguments, returns a double) so we can call it as a native function.
+			double (*FP)() = (double (*)())(intptr_t)cantFail(ExprSymbol.getAddress());
+			fprintf(stderr, "Evaluated to %f\n", FP());
+
+			// Delete the anonymous expression module from the JIT.
+			TheJIT->removeModule(H);
 		}
 	}
 	else
@@ -677,11 +713,39 @@ static void MainLoop()
 }
 
 //===----------------------------------------------------------------------===//
+// "Library" functions that can be "extern'd" from user code.
+//===----------------------------------------------------------------------===//
+
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
+/// putchard - putchar that takes a double and returns 0.
+extern "C" DLLEXPORT double putchard(double X)
+{
+	fputc((char)X, stderr);
+	return 0;
+}
+
+/// printd - printf that takes a double prints it as "%f\n", returning 0.
+extern "C" DLLEXPORT double printd(double X)
+{
+	fprintf(stderr, "%f\n", X);
+	return 0;
+}
+
+//===----------------------------------------------------------------------===//
 // Main driver code.
 //===----------------------------------------------------------------------===//
 
 int main()
 {
+	InitializeNativeTarget();
+	InitializeNativeTargetAsmPrinter();
+	InitializeNativeTargetAsmParser();
+
 	// Install standard binary operators.
 	// 1 is lowest precedence.
 	BinopPrecedence['<'] = 10;
@@ -693,14 +757,12 @@ int main()
 	fprintf(stderr, "ready> ");
 	getNextToken();
 
-	// Make the module, which holds all the code.
-	InitializeModule();
+	TheJIT = std::make_unique<KaleidoscopeJIT>();
+
+	InitializeModuleAndPassManager();
 
 	// Run the main "interpreter loop" now.
 	MainLoop();
-
-	// Print out all of the generated code.
-	TheModule->print(errs(), nullptr);
 
 	return 0;
 }
