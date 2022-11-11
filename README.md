@@ -1,7 +1,7 @@
 # llvm_playground
 from https://www.llvm.org/docs/tutorial/MyFirstLanguageFrontend
 
-clang++-15 -g -O3 toy.cpp `llvm-config --cxxflags`
+clang++ -g toy.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core orcjit native` -O3 -o toy
 
 ## Kaleidoscope 
 ``` 
