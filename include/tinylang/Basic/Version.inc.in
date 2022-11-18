@@ -1,1 +1,2 @@
+// @ symbols denote that this is a CMake variable that should be replaced with their content.
 #define TINYLANG_VERSION_STRING "@TINYLANG_VERSION_STRING@"
