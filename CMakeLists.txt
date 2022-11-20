@@ -1,42 +1,31 @@
-cmake_minimum_required(VERSION 3.4.3)
+﻿cmake_minimum_required (VERSION 3.8)
 
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(Tinylang)
-  
-  set(CMAKE_SUPPRESS_REGENERATION true)
-  set(CMAKE_CXX_STANDARD 20)
-  
-  find_package(LLVM REQUIRED HINTS "${LLVM_CMAKE_PATH}")
-  list(APPEND CMAKE_MODULE_PATH ${LLVM_DIR})
+project ("calc")
 
-  # in vs, sets the correct runtime library to link again
-  include(ChooseMSVCCRT)
-  include(AddLLVM)
-  include(HandleLLVMOptions)
+include(CheckIncludeFile)
+include(CheckIncludeFileCXX)
+include(CheckLibraryExists)
+include(CheckCXXCompilerFlag)
 
-  include_directories("${LLVM_BINARY_DIR}/include" "${LLVM_INCLUDE_DIR}")
-  link_directories("${LLVM_LIBRARY_DIR}")
+set(CMAKE_CXX_STANDARD 20)
 
-  set(TINYLANG_BUILT_STANDALONE 1)
+find_package(LLVM REQUIRED CONFIG)
+message("Found LLVM ${LLVM_PACKAGE_VERSION}, build type ${LLVM_BUILD_TYPE}")
+list(APPEND CMAKE_MODULE_PATH ${LLVM_DIR})
+include(DetermineGCCCompatible)
+include(ChooseMSVCCRT)
+
+add_definitions(${LLVM_DEFINITIONS})
+include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
+llvm_map_components_to_libnames(llvm_libs Core)
+
+if(LLVM_COMPILER_IS_GCC_COMPATIBLE)
+  if(NOT LLVM_ENABLE_RTTI)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
+  endif()
+  if(NOT LLVM_ENABLE_EH)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions")
+  endif()
 endif()
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
-
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR AND NOT MSVC_IDE)
-  message(FATAL_ERROR "In-source builds are not allowed. ")
-endif()
-
-set(TINYLANG_VERSION_STRING "0.1")
-configure_file(
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/tinylang/Basic/Version.inc.in
-  ${CMAKE_CURRENT_BINARY_DIR}/include/tinylang/Basic/Version.inc)
-
-include(AddTinylang)
-
-include_directories(BEFORE
-  ${CMAKE_CURRENT_BINARY_DIR}/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-  )
-
-add_subdirectory(lib)
-add_subdirectory(tools)
+add_subdirectory ("src")
