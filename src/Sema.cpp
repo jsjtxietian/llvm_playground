@@ -10,8 +10,7 @@ class DeclCheck : public ASTVisitor {
   enum ErrorType { Twice, Not };
 
   void error(ErrorType ET, llvm::StringRef V) {
-    llvm::errs() << "Variable " << V << " "
-                 << (ET == Twice ? "already" : "not")
+    llvm::errs() << "Variable " << V << " " << (ET == Twice ? "already" : "not")
                  << " declared\n";
     HasError = true;
   }
@@ -39,9 +38,9 @@ public:
       HasError = true;
   };
 
+  // the set is populated and the walk over the expression is started
   virtual void visit(WithDecl &Node) override {
-    for (auto I = Node.begin(), E = Node.end(); I != E;
-         ++I) {
+    for (auto I = Node.begin(), E = Node.end(); I != E; ++I) {
       if (!Scope.insert(*I).second)
         error(Twice, *I);
     }
@@ -51,7 +50,7 @@ public:
       HasError = true;
   };
 };
-}
+} // namespace
 
 bool Sema::semantic(AST *Tree) {
   if (!Tree)
