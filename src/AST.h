@@ -32,6 +32,7 @@ public:
 
 class Factor : public Expr {
 public:
+  // numbers and variables are treated almost identically
   enum ValueKind { Ident, Number };
 
 private:
@@ -39,15 +40,14 @@ private:
   llvm::StringRef Val;
 
 public:
-  Factor(ValueKind Kind, llvm::StringRef Val)
-      : Kind(Kind), Val(Val) {}
+  Factor(ValueKind Kind, llvm::StringRef Val) : Kind(Kind), Val(Val) {}
   ValueKind getKind() { return Kind; }
   llvm::StringRef getVal() { return Val; }
-  virtual void accept(ASTVisitor &V) override {
-    V.visit(*this);
-  }
+  virtual void accept(ASTVisitor &V) override { V.visit(*this); }
 };
 
+// makes no distinction between multiplicative and additive operators
+// The precedence of the operators is implicitly available in the tree structure.
 class BinaryOp : public Expr {
 public:
   enum Operator { Plus, Minus, Mul, Div };
@@ -58,14 +58,11 @@ private:
   Operator Op;
 
 public:
-  BinaryOp(Operator Op, Expr *L, Expr *R)
-      : Op(Op), Left(L), Right(R) {}
+  BinaryOp(Operator Op, Expr *L, Expr *R) : Op(Op), Left(L), Right(R) {}
   Expr *getLeft() { return Left; }
   Expr *getRight() { return Right; }
   Operator getOperator() { return Op; }
-  virtual void accept(ASTVisitor &V) override {
-    V.visit(*this);
-  }
+  virtual void accept(ASTVisitor &V) override { V.visit(*this); }
 };
 
 class WithDecl : public AST {
@@ -74,14 +71,11 @@ class WithDecl : public AST {
   Expr *E;
 
 public:
-  WithDecl(llvm::SmallVector<llvm::StringRef, 8> Vars,
-           Expr *E)
+  WithDecl(llvm::SmallVector<llvm::StringRef, 8> Vars, Expr *E)
       : Vars(Vars), E(E) {}
   VarVector::const_iterator begin() { return Vars.begin(); }
   VarVector::const_iterator end() { return Vars.end(); }
   Expr *getExpr() { return E; }
-  virtual void accept(ASTVisitor &V) override {
-    V.visit(*this);
-  }
+  virtual void accept(ASTVisitor &V) override { V.visit(*this); }
 };
 #endif
