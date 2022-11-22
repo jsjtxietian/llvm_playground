@@ -11,3 +11,8 @@ term : factor (( "*" | "/") factor)* ;
 factor : ident | number | "(" expr ")" ;
 ident : ([a-zAZ])+ ;
 number : ([0-9])+ ;
+
+
+$ calc "with a: a*3" | llc –filetype=obj –o=expr.obj
+$ cl expr.obj rtcalc.c
+$ expr
