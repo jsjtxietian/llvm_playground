@@ -8,15 +8,21 @@ using namespace llvm;
 
 namespace {
 class ToIRVisitor : public ASTVisitor {
+  // Each compilation unit is represented in LLVM by the Module class and
+  // the visitor has a pointer to the module call, M.
   Module *M;
   IRBuilder<> Builder;
+  // cache the needed type instance
   Type *VoidTy;
   Type *Int32Ty;
   Type *Int8PtrTy;
   Type *Int8PtrPtrTy;
   Constant *Int32Zero;
 
+  // the current calculated value, which is updated through tree traversal
   Value *V;
+  // maps a variable name to the value that's returned by the calc_read()
+  // function
   StringMap<Value *> nameMap;
 
 public:
@@ -29,21 +35,20 @@ public:
   }
 
   void run(AST *Tree) {
-    FunctionType *MainFty = FunctionType::get(
-        Int32Ty, {Int32Ty, Int8PtrPtrTy}, false);
-    Function *MainFn = Function::Create(
-        MainFty, GlobalValue::ExternalLinkage, "main", M);
-    BasicBlock *BB = BasicBlock::Create(M->getContext(),
-                                        "entry", MainFn);
+    // or each function, a FunctionType instance must be created. In C
+    // ++ terminology, this is a function prototype.
+    FunctionType *MainFty =
+        FunctionType::get(Int32Ty, {Int32Ty, Int8PtrPtrTy}, false);
+    Function *MainFn =
+        Function::Create(MainFty, GlobalValue::ExternalLinkage, "main", M);
+    BasicBlock *BB = BasicBlock::Create(M->getContext(), "entry", MainFn);
     Builder.SetInsertPoint(BB);
 
     Tree->accept(*this);
 
-    FunctionType *CalcWriteFnTy =
-        FunctionType::get(VoidTy, {Int32Ty}, false);
+    FunctionType *CalcWriteFnTy = FunctionType::get(VoidTy, {Int32Ty}, false);
     Function *CalcWriteFn = Function::Create(
-        CalcWriteFnTy, GlobalValue::ExternalLinkage,
-        "calc_write", M);
+        CalcWriteFnTy, GlobalValue::ExternalLinkage, "calc_write", M);
     Builder.CreateCall(CalcWriteFnTy, CalcWriteFn, {V});
 
     Builder.CreateRet(Int32Zero);
@@ -81,27 +86,25 @@ public:
   };
 
   virtual void visit(WithDecl &Node) override {
-    FunctionType *ReadFty =
-        FunctionType::get(Int32Ty, {Int8PtrTy}, false);
-    Function *ReadFn = Function::Create(
-        ReadFty, GlobalValue::ExternalLinkage, "calc_read",
-        M);
-    for (auto I = Node.begin(), E = Node.end(); I != E;
-         ++I) {
+    FunctionType *ReadFty = FunctionType::get(Int32Ty, {Int8PtrTy}, false);
+    Function *ReadFn =
+        Function::Create(ReadFty, GlobalValue::ExternalLinkage, "calc_read", M);
+    //  loops through the variable names:
+    for (auto I = Node.begin(), E = Node.end(); I != E; ++I) {
+      // For each variable, a string with a variable name is created:
       StringRef Var = *I;
-
       // Create call to calc_read function.
-      Constant *StrText = ConstantDataArray::getString(
-          M->getContext(), Var);
-      GlobalVariable *Str = new GlobalVariable(
-          *M, StrText->getType(),
-          /*isConstant=*/true, GlobalValue::PrivateLinkage,
-          StrText, Twine(Var).concat(".str"));
-      Value *Ptr = Builder.CreateInBoundsGEP(
-          Str, {Int32Zero, Int32Zero}, "ptr");
-      CallInst *Call =
-          Builder.CreateCall(ReadFty, ReadFn, {Ptr});
+      Constant *StrText = ConstantDataArray::getString(M->getContext(), Var);
+      GlobalVariable *Str =
+          new GlobalVariable(*M, StrText->getType(),
+                             /*isConstant=*/true, GlobalValue::PrivateLinkage,
+                             StrText, Twine(Var).concat(".str"));
+      // the IR code to call the calc_read() function is created.
+      Value *Ptr =
+          Builder.CreateInBoundsGEP(Str, {Int32Zero, Int32Zero}, "ptr");
+      CallInst *Call = Builder.CreateCall(ReadFty, ReadFn, {Ptr});
 
+      // The returned value is stored in the mapNames map
       nameMap[Var] = Call;
     }
 
@@ -110,6 +113,8 @@ public:
 };
 } // namespace
 
+// creates the global context and the module, runs the tree traversal,
+// and dumps the generated IR to the console:
 void CodeGen::compile(AST *Tree) {
   LLVMContext Ctx;
   Module *M = new Module("calc.expr", Ctx);
