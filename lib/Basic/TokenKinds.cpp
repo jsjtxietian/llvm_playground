@@ -7,6 +7,7 @@ static const char * const TokNames[] = {
 #define TOK(ID) #ID,
 #define KEYWORD(ID, FLAG) #ID,
 #include "tinylang/Basic/TokenKinds.def"
+// accounting for the added NUM_TOKENS enumeration member:
   nullptr
 };
 

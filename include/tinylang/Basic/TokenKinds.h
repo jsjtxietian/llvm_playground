@@ -9,6 +9,8 @@ namespace tok {
 enum TokenKind : unsigned short {
 #define TOK(ID) ID,
 #include "TokenKinds.def"
+  // as the last member of the enumeration, denoting the
+  // number of defined tokens
   NUM_TOKENS
 };
 

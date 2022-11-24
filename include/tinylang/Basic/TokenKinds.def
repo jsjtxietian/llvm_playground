@@ -5,6 +5,7 @@
 #define PUNCTUATOR(ID, SP) TOK(ID)
 #endif
 #ifndef KEYWORD
+// keywords are prefixed with kw_:
 #define KEYWORD(ID, FLAG) TOK(kw_ ## ID)
 #endif
 
