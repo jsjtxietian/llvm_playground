@@ -11,6 +11,7 @@
 
 namespace tinylang {
 
+// not pollute the global namespace
 namespace diag {
 enum {
 #define DIAG(ID, Level, Msg) ID,
@@ -34,7 +35,7 @@ public:
 
   template <typename... Args>
   void report(SMLoc Loc, unsigned DiagID,
-              Args &&... Arguments) {
+              Args &&...Arguments) {
     std::string Msg =
         llvm::formatv(getDiagnosticText(DiagID),
                       std::forward<Args>(Arguments)...)
