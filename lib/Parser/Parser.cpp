@@ -391,6 +391,8 @@ bool Parser::parseStatement(StmtList &Stmts) {
     return false;
   }
 _error:
+  // This method assumes that a syntax error can be handled locally
+  // or use the FOLLOW sets of the active callers
   while (
       !Tok.isOneOf(tok::semi, tok::kw_ELSE, tok::kw_END)) {
     advance();
@@ -398,6 +400,8 @@ _error:
       return true;
   }
   return false;
+  // true means that error recovery hasn't finished yet, 
+  // while false means that parsing (including possible error recovery) was successful.
 }
 
 bool Parser::parseIfStatement(StmtList &Stmts) {
