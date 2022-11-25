@@ -39,3 +39,7 @@ addOperator : "+" | "-" | "OR" ;
 term : factor ( mulOperator factor )* ;
 mulOperator : "*" | "/" | "DIV" | "MOD" | "AND" ;
 factor : integer_literal | "(" expression ")" | "NOT" factor | qualident ( "(" ( expList )? ")" )? ;
+
+
+bison tinylang.yy
+flex –c++ tinylang.l
