@@ -3,6 +3,7 @@
 
 using namespace tinylang;
 
+// RAII
 void Sema::enterScope(Decl *D) {
   CurrentScope = new Scope(CurrentScope);
   CurrentDecl = D;
@@ -60,7 +61,7 @@ void Sema::checkFormalAndActualParameters(
 }
 
 void Sema::initialize() {
-  // Setup global scope.
+  // The initialization of the global scope
   CurrentScope = new Scope();
   CurrentDecl = nullptr;
   IntegerType =
@@ -121,6 +122,11 @@ void Sema::actOnVariableDeclaration(DeclList &Decls,
   assert(CurrentScope && "CurrentScope not set");
   if (TypeDeclaration *Ty = dyn_cast<TypeDeclaration>(D)) {
     for (auto I = Ids.begin(), E = Ids.end(); I != E; ++I) {
+      // a VariableDeclaration is instantiated and added
+      // to the list of declarations. If adding the variable
+      // to the current scope fails because the name has
+      // already been declared, then an error message is
+      // printed.
       SMLoc Loc = I->first;
       StringRef Name = I->second;
       VariableDeclaration *Decl = new VariableDeclaration(
@@ -167,6 +173,10 @@ Sema::actOnProcedureDeclaration(SMLoc Loc, StringRef Name) {
   return P;
 }
 
+// the semantic analyzer must only check if the name at the
+// end of the procedure declaration is equal to the name of
+// the procedure, and also if the declaration that's used
+// for the return type is really a type declaration:
 void Sema::actOnProcedureHeading(
     ProcedureDeclaration *ProcDecl, FormalParamList &Params,
     Decl *RetType) {
@@ -254,7 +264,8 @@ void Sema::actOnReturnStatement(StmtList &Stmts, SMLoc Loc,
   if (Proc->getRetType() && !RetVal)
     Diags.report(Loc, diag::err_function_requires_return);
   else if (!Proc->getRetType() && RetVal)
-    Diags.report(Loc, diag::err_procedure_requires_empty_return);
+    Diags.report(Loc,
+                 diag::err_procedure_requires_empty_return);
   else if (Proc->getRetType() && RetVal) {
     if (Proc->getRetType() != RetVal->getType())
       Diags.report(Loc, diag::err_function_and_return_type);
@@ -388,7 +399,8 @@ Expr *Sema::actOnVariable(Decl *D) {
     return nullptr;
   if (auto *V = dyn_cast<VariableDeclaration>(D))
     return new VariableAccess(V);
-  else if (auto *P = dyn_cast<FormalParameterDeclaration>(D))
+  else if (auto *P =
+               dyn_cast<FormalParameterDeclaration>(D))
     return new VariableAccess(P);
   else if (auto *C = dyn_cast<ConstantDeclaration>(D)) {
     if (C == TrueConst)

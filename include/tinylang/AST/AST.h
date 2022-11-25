@@ -54,6 +54,7 @@ private:
   const DeclKind Kind;
 
 protected:
+  // required to code-generate nested procedures
   Decl *EnclosingDecL;
   SMLoc Loc;
   StringRef Name;

@@ -91,6 +91,7 @@ public:
                            StringRef Name);
 };
 
+// RAII
 class EnterDeclScope {
   Sema &Semantics;
 
