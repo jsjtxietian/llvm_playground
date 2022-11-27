@@ -100,9 +100,6 @@ void Lexer::next(Token &Result) {
         formToken(Result, CurPtr + 1, tok::colon);
       break;
     case '<':
-      // the input ends with a null byte.
-      // So the next character can always be used if the
-      // current character is valid:
       if (*(CurPtr + 1) == '=')
         formToken(Result, CurPtr + 2, tok::lessequal);
       else
@@ -197,7 +194,7 @@ void Lexer::comment() {
 void Lexer::formToken(Token &Result, const char *TokEnd,
                       tok::TokenKind Kind) {
   size_t TokLen = TokEnd - CurPtr;
-  Result.Ptr = CurPtr;
+  Result.Ptr = CurPtr;;
   Result.Length = TokLen;
   Result.Kind = Kind;
   CurPtr = TokEnd;

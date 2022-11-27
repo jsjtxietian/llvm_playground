@@ -195,15 +195,6 @@ bool Parser::parseVariableDeclaration(DeclList &Decls) {
     Actions.actOnVariableDeclaration(Decls, Ids, D);
     return false;
   }
-  // or use lambda
-  // auto _errorhandler = [this] {
-  //   while (!Tok.is(tok::semi)) {
-  //     advance();
-  //     if (Tok.is(tok::eof))
-  //       return true;
-  //   }
-  //   return false;
-  // };
 _error:
   while (!Tok.is(tok::semi)) {
     advance();
@@ -220,9 +211,6 @@ bool Parser::parseProcedureDeclaration(
       goto _error;
     if (expect(tok::identifier))
       goto _error;
-    // after the name is parsed. Here, the (almost empty)
-    // AST node is constructed, and a new scope is
-    // established
     ProcedureDeclaration *D =
         Actions.actOnProcedureDeclaration(
             Tok.getLocation(), Tok.getIdentifier());
@@ -403,8 +391,6 @@ bool Parser::parseStatement(StmtList &Stmts) {
     return false;
   }
 _error:
-  // This method assumes that a syntax error can be handled
-  // locally or use the FOLLOW sets of the active callers
   while (
       !Tok.isOneOf(tok::semi, tok::kw_ELSE, tok::kw_END)) {
     advance();
@@ -412,9 +398,6 @@ _error:
       return true;
   }
   return false;
-  // true means that error recovery hasn't finished yet,
-  // while false means that parsing (including possible
-  // error recovery) was successful.
 }
 
 bool Parser::parseIfStatement(StmtList &Stmts) {

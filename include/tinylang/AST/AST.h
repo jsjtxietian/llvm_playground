@@ -35,10 +35,6 @@ public:
 
 using IdentList = std::vector<std::pair<SMLoc, StringRef>>;
 
-// To implement the LLVM-style RTTI, a public enumeration
-// containing a label for each subclass is added. Also, a
-// private member of this type and a public getter is
-// required.
 class Decl {
 public:
   enum DeclKind {
@@ -54,7 +50,6 @@ private:
   const DeclKind Kind;
 
 protected:
-  // required to code-generate nested procedures
   Decl *EnclosingDecL;
   SMLoc Loc;
   StringRef Name;
@@ -71,12 +66,6 @@ public:
   Decl *getEnclosingDecl() { return EnclosingDecL; }
 };
 
-// Each subclass now needs a special function member called
-// classof. The purpose of this function is to determine if
-// a given instance is of the requested type.
-// use the llvm::isa<> special templates to check if an
-// object is of the requested type and llvm::dyn_cast<> to
-// dynamically cast the object.
 class ModuleDeclaration : public Decl {
   DeclList Decls;
   StmtList Stmts;
@@ -337,7 +326,7 @@ public:
       : Expr(EK_Const, Const->getExpr()->getType(), true),
         Const(Const) {}
 
-  ConstantDeclaration *geDecl() { return Const; }
+  ConstantDeclaration *getDecl() { return Const; }
 
   static bool classof(const Expr *E) {
     return E->getKind() == EK_Const;

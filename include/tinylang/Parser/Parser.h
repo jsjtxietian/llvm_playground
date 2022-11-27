@@ -14,10 +14,6 @@ class Parser {
 
   Lexer &Lex;
 
-  // The parser class knows an instance of the semantic
-  // analyzer class, Sema, which is stored in the Actions
-  // member. A call to actOnVariableDeclaration()...etc
-  // runs the semantic analyzer and the AST construction.
   Sema &Actions;
 
   Token Tok;

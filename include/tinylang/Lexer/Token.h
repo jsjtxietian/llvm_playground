@@ -44,9 +44,6 @@ public:
     return tok::getTokenName(Kind);
   }
 
-  // The SMLoc instance, which denotes the source's position
-  // in the messages, is created from the pointer to the
-  // token:
   SMLoc getLocation() const {
     return SMLoc::getFromPointer(Ptr);
   }
