@@ -4,6 +4,8 @@
 
 using namespace tinylang;
 
+// store the current value of a local variable in a basic
+// block
 void CGProcedure::writeLocalVariable(llvm::BasicBlock *BB,
                                      Decl *Decl,
                                      llvm::Value *Val) {
@@ -27,6 +29,8 @@ CGProcedure::readLocalVariable(llvm::BasicBlock *BB,
   auto Val = CurrentDef[BB].Defs.find(Decl);
   if (Val != CurrentDef[BB].Defs.end())
     return Val->second;
+  // extend the search to the predecessors using a possible
+  // recursive search
   return readLocalVariableRecursive(BB, Decl);
 }
 
@@ -35,6 +39,9 @@ llvm::Value *CGProcedure::readLocalVariableRecursive(
   llvm::Value *Val = nullptr;
   if (!CurrentDef[BB].Sealed) {
     // Add incomplete phi for variable.
+    // we need to look up the value of the variable not
+    // yet defined in this basic block, then we insert an
+    // empty phi instruction and use it as the value.
     llvm::PHINode *Phi = addEmptyPhi(BB, Decl);
     CurrentDef[BB].IncompletePhis[Phi] = Decl;
     Val = Phi;
@@ -53,6 +60,8 @@ llvm::Value *CGProcedure::readLocalVariableRecursive(
   return Val;
 }
 
+// inserts an empty phi instruction at
+// the beginning of the basic block
 llvm::PHINode *
 CGProcedure::addEmptyPhi(llvm::BasicBlock *BB, Decl *Decl) {
   return BB->empty()
@@ -62,6 +71,9 @@ CGProcedure::addEmptyPhi(llvm::BasicBlock *BB, Decl *Decl) {
                                      &BB->front());
 }
 
+// first search all the predecessors of the basic block and
+// add the operand pair value and basic block to the phi
+// instruction. Then, we try to optimize the instruction:
 void CGProcedure::addPhiOperands(llvm::BasicBlock *BB,
                                  Decl *Decl,
                                  llvm::PHINode *Phi) {

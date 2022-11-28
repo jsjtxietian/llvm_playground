@@ -24,35 +24,55 @@ class CGProcedure {
   llvm::Function *Fn;
 
   struct BasicBlockDef {
-    // Maps the variable (or formal parameter) to its definition.
-    llvm::DenseMap<Decl *, llvm::TrackingVH<llvm::Value>> Defs;
-    // Set of incompleted phi instructions.
+    // Maps the variable (or formal parameter) to its
+    // definition. llvm::Value, represents a value in SSA
+    // form Value class acts like a label on the result of a
+    // computation To track replacements, use the
+    // llvm::TrackingVH<> class
+    llvm::DenseMap<Decl *, llvm::TrackingVH<llvm::Value>>
+        Defs;
+    // Set of incompleted phi instructions that we need to
+    // later update
     llvm::DenseMap<llvm::PHINode *, Decl *> IncompletePhis;
-    // Block is sealed, that is, no more predecessors will be added.
+    // Block is sealed, that is, no more predecessors will
+    // be added.
     unsigned Sealed : 1;
 
     BasicBlockDef() : Sealed(0) {}
   };
 
-  llvm::DenseMap<llvm::BasicBlock *, BasicBlockDef> CurrentDef;
+  llvm::DenseMap<llvm::BasicBlock *, BasicBlockDef>
+      CurrentDef;
 
-  void writeLocalVariable(llvm::BasicBlock *BB, Decl *Decl, llvm::Value *Val);
-  llvm::Value *readLocalVariable(llvm::BasicBlock *BB, Decl *Decl);
-  llvm::Value *readLocalVariableRecursive(llvm::BasicBlock *BB, Decl *Decl);
-  llvm::PHINode *addEmptyPhi(llvm::BasicBlock *BB, Decl *Decl);
+  void writeLocalVariable(llvm::BasicBlock *BB, Decl *Decl,
+                          llvm::Value *Val);
+  llvm::Value *readLocalVariable(llvm::BasicBlock *BB,
+                                 Decl *Decl);
+  llvm::Value *
+  readLocalVariableRecursive(llvm::BasicBlock *BB,
+                             Decl *Decl);
+  llvm::PHINode *addEmptyPhi(llvm::BasicBlock *BB,
+                             Decl *Decl);
   void addPhiOperands(llvm::BasicBlock *BB, Decl *Decl,
                       llvm::PHINode *Phi);
   void optimizePhi(llvm::PHINode *Phi);
   void sealBlock(llvm::BasicBlock *BB);
 
-  llvm::DenseMap<FormalParameterDeclaration *, llvm::Argument *> FormalParams;
+  llvm::DenseMap<FormalParameterDeclaration *,
+                 llvm::Argument *>
+      FormalParams;
 
-  void writeVariable(llvm::BasicBlock *BB, Decl *Decl, llvm::Value *Val);
-  llvm::Value *readVariable(llvm::BasicBlock *BB, Decl *Decl);
+  void writeVariable(llvm::BasicBlock *BB, Decl *Decl,
+                     llvm::Value *Val);
+  llvm::Value *readVariable(llvm::BasicBlock *BB,
+                            Decl *Decl);
 
   llvm::Type *mapType(Decl *Decl);
-  llvm::FunctionType *createFunctionType(ProcedureDeclaration *Proc);
-  llvm::Function *createFunction(ProcedureDeclaration *Proc, llvm::FunctionType *FTy);
+  llvm::FunctionType *
+  createFunctionType(ProcedureDeclaration *Proc);
+  llvm::Function *createFunction(ProcedureDeclaration *Proc,
+                                 llvm::FunctionType *FTy);
+
 protected:
   void setCurr(llvm::BasicBlock *BB) {
     Curr = BB;
