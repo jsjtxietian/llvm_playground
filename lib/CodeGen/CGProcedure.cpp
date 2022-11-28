@@ -152,6 +152,9 @@ void CGProcedure::writeVariable(llvm::BasicBlock *BB,
     llvm::report_fatal_error("Unsupported declaration");
 }
 
+// A parameter passed by value is treated as a local
+// variable, and a parameter passed by reference is treated
+// as a global variable.
 llvm::Value *CGProcedure::readVariable(llvm::BasicBlock *BB,
                                        Decl *D) {
   if (auto *V = llvm::dyn_cast<VariableDeclaration>(D)) {
@@ -177,6 +180,7 @@ llvm::Value *CGProcedure::readVariable(llvm::BasicBlock *BB,
     llvm::report_fatal_error("Unsupported declaration");
 }
 
+// For a formal parameter that passes by reference
 llvm::Type *CGProcedure::mapType(Decl *Decl) {
   if (auto *FP = llvm::dyn_cast<FormalParameterDeclaration>(
           Decl)) {
@@ -190,6 +194,9 @@ llvm::Type *CGProcedure::mapType(Decl *Decl) {
   return CGM.convertType(llvm::cast<TypeDeclaration>(Decl));
 }
 
+// Creating the function type involves mapping the types
+// and then calling the factory method to create the
+// function type
 llvm::FunctionType *CGProcedure::createFunctionType(
     ProcedureDeclaration *Proc) {
   llvm::Type *ResultTy = CGM.VoidTy;
@@ -206,6 +213,8 @@ llvm::FunctionType *CGProcedure::createFunctionType(
                                  /* IsVarArgs */ false);
 }
 
+// associates the function type with the linkage and the
+// mangled name:
 llvm::Function *
 CGProcedure::createFunction(ProcedureDeclaration *Proc,
                             llvm::FunctionType *FTy) {
@@ -221,6 +230,7 @@ CGProcedure::createFunction(ProcedureDeclaration *Proc,
         Proc->getFormalParams()[Idx];
     if (FP->isVar()) {
       llvm::AttrBuilder Attr;
+      // get the storage size of a parameter type
       llvm::TypeSize Sz =
           CGM.getModule()->getDataLayout().getTypeStoreSize(
               CGM.convertType(FP->getType()));
@@ -445,10 +455,18 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
   Fty = createFunctionType(Proc);
   Fn = createFunction(Proc, Fty);
 
+  // create the first basic block of the function and make
+  // it the current one:
   llvm::BasicBlock *BB = llvm::BasicBlock::Create(
       CGM.getLLVMCtx(), "entry", Fn);
   setCurr(BB);
 
+  // step through all formal parameters.
+  // To handle VAR parameters correctly, we need to
+  // initialize the FormalParams member (used in
+  // readVariable()). In contrast to local variables, formal
+  // parameters have a value in the first basic block, so we
+  // make these values known:
   size_t Idx = 0;
   auto &Defs = CurrentDef[BB];
   for (auto I = Fn->arg_begin(), E = Fn->arg_end(); I != E;
@@ -480,6 +498,8 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
   if (!Curr->getTerminator()) {
     Builder.CreateRetVoid();
   }
+  // The last block after generating the IR code may not yet
+  // be sealed
   sealBlock(Curr);
 }
 

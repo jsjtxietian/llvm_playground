@@ -9,7 +9,8 @@ void CGModule::initialize() {
   Int1Ty = llvm::Type::getInt1Ty(getLLVMCtx());
   Int32Ty = llvm::Type::getInt32Ty(getLLVMCtx());
   Int64Ty = llvm::Type::getInt64Ty(getLLVMCtx());
-  Int32Zero = llvm::ConstantInt::get(Int32Ty, 0, /*isSigned*/ true);
+  Int32Zero =
+      llvm::ConstantInt::get(Int32Ty, 0, /*isSigned*/ true);
 }
 
 llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
@@ -20,6 +21,7 @@ llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
   llvm::report_fatal_error("Unsupported type");
 }
 
+// Square.Root => _t6Square4Root
 std::string CGModule::mangleName(Decl *D) {
   std::string Mangled;
   llvm::SmallString<16> Tmp;
