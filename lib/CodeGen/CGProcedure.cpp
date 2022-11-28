@@ -358,6 +358,7 @@ void CGProcedure::emitStmt(IfStatement *Stmt) {
 
 void CGProcedure::emitStmt(WhileStatement *Stmt) {
   // The basic block for the condition.
+  // The Fn variable denotes the current function
   llvm::BasicBlock *WhileCondBB = llvm::BasicBlock::Create(
       CGM.getLLVMCtx(), "while.cond", Fn);
   // The basic block for the while body.
@@ -367,8 +368,13 @@ void CGProcedure::emitStmt(WhileStatement *Stmt) {
   llvm::BasicBlock *AfterWhileBB = llvm::BasicBlock::Create(
       CGM.getLLVMCtx(), "after.while", Fn);
 
+  // end the current basic block with a branch to the basic
+  // block, which will hold the condition:
   Builder.CreateBr(WhileCondBB);
   sealBlock(Curr);
+  // The basic block for the condition becomes the new
+  // current basic block. We generate the condition and end
+  // the block with a conditional branch:
   setCurr(WhileCondBB);
   llvm::Value *Cond = emitExpr(Stmt->getCond());
   Builder.CreateCondBr(Cond, WhileBodyBB, AfterWhileBB);
@@ -379,6 +385,8 @@ void CGProcedure::emitStmt(WhileStatement *Stmt) {
   sealBlock(Curr);
   sealBlock(WhileCondBB);
 
+  // The empty basic block for statements following the
+  // WHILE statement becomes the new current basic block
   setCurr(AfterWhileBB);
 }
 
