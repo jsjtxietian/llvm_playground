@@ -85,6 +85,12 @@ void CGProcedure::addPhiOperands(llvm::BasicBlock *BB,
   optimizePhi(Phi);
 }
 
+// If the instruction has only one operand or all operands
+// have the same value, then we replace the instruction with
+// this value. If the instruction has no operand, then we
+// replace the instruction with the special value, Undef.
+// Only if the instruction has two or more distinct operands
+// do we have to keep the instruction:
 void CGProcedure::optimizePhi(llvm::PHINode *Phi) {
   llvm::Value *Same = nullptr;
   for (llvm::Value *V : Phi->incoming_values()) {
@@ -97,6 +103,8 @@ void CGProcedure::optimizePhi(llvm::PHINode *Phi) {
   if (Same == nullptr)
     Same = llvm::UndefValue::get(Phi->getType());
   // Collect phi instructions using this one.
+  // search for all uses of the value in other phi
+  // instructions and then try to optimize these
   llvm::SmallVector<llvm::PHINode *, 8> CandidatePhis;
   for (llvm::Use &U : Phi->uses()) {
     if (auto *P =
@@ -110,6 +118,8 @@ void CGProcedure::optimizePhi(llvm::PHINode *Phi) {
     optimizePhi(P);
 }
 
+// simply add the missing operands to the incomplete phi
+// instructions and set the flag:
 void CGProcedure::sealBlock(llvm::BasicBlock *BB) {
   assert(!CurrentDef[BB].Sealed &&
          "Attempt to seal already sealed block");
