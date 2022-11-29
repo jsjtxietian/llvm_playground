@@ -41,6 +41,8 @@ llvm::GlobalObject *CGModule::getGlobal(Decl *D) {
   return Globals[D];
 }
 
+// A global variable in tinylang is mapped to
+// an instance of the llvm::GobalValue class
 void CGModule::run(ModuleDeclaration *Mod) {
   for (auto *Decl : Mod->getDecls()) {
     if (auto *Var =
