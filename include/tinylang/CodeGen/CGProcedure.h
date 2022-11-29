@@ -25,14 +25,10 @@ class CGProcedure {
 
   struct BasicBlockDef {
     // Maps the variable (or formal parameter) to its
-    // definition. llvm::Value, represents a value in SSA
-    // form Value class acts like a label on the result of a
-    // computation To track replacements, use the
-    // llvm::TrackingVH<> class
+    // definition.
     llvm::DenseMap<Decl *, llvm::TrackingVH<llvm::Value>>
         Defs;
-    // Set of incompleted phi instructions that we need to
-    // later update
+    // Set of incompleted phi instructions.
     llvm::DenseMap<llvm::PHINode *, Decl *> IncompletePhis;
     // Block is sealed, that is, no more predecessors will
     // be added.
@@ -53,19 +49,21 @@ class CGProcedure {
                              Decl *Decl);
   llvm::PHINode *addEmptyPhi(llvm::BasicBlock *BB,
                              Decl *Decl);
-  void addPhiOperands(llvm::BasicBlock *BB, Decl *Decl,
+  llvm::Value *addPhiOperands(llvm::BasicBlock *BB, Decl *Decl,
                       llvm::PHINode *Phi);
-  void optimizePhi(llvm::PHINode *Phi);
+  llvm::Value *optimizePhi(llvm::PHINode *Phi);
   void sealBlock(llvm::BasicBlock *BB);
 
   llvm::DenseMap<FormalParameterDeclaration *,
                  llvm::Argument *>
       FormalParams;
+  llvm::DenseMap<Decl *, llvm::DILocalVariable *>
+      DIVariables;
 
   void writeVariable(llvm::BasicBlock *BB, Decl *Decl,
                      llvm::Value *Val);
   llvm::Value *readVariable(llvm::BasicBlock *BB,
-                            Decl *Decl);
+                            Decl *Decl, bool LoadVal = true);
 
   llvm::Type *mapType(Decl *Decl);
   llvm::FunctionType *
@@ -77,6 +75,13 @@ protected:
   void setCurr(llvm::BasicBlock *BB) {
     Curr = BB;
     Builder.SetInsertPoint(Curr);
+  }
+
+  llvm::BasicBlock *createBasicBlock(
+      const llvm::Twine &Name,
+      llvm::BasicBlock *InsertBefore = nullptr) {
+    return llvm::BasicBlock::Create(CGM.getLLVMCtx(), Name,
+                                    Fn, InsertBefore);
   }
 
   llvm::Value *emitInfixExpr(InfixExpression *E);

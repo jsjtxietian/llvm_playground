@@ -84,6 +84,9 @@ void Lexer::next(Token &Result) {
       CASE(',', tok::comma);
       CASE('.', tok::period);
       CASE(';', tok::semi);
+      CASE('^', tok::caret);
+      CASE('[', tok::l_square);
+      CASE(']', tok::r_square);
       CASE(')', tok::r_paren);
 #undef CASE
     case '(':

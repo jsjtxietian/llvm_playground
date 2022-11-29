@@ -49,6 +49,19 @@ public:
   void actOnImport(StringRef ModuleName, IdentList &Ids);
   void actOnConstantDeclaration(DeclList &Decls, SMLoc Loc,
                                 StringRef Name, Expr *E);
+  void actOnAliasTypeDeclaration(DeclList &Decls, SMLoc Loc,
+                                 StringRef Name, Decl *D);
+  void actOnArrayTypeDeclaration(DeclList &Decls, SMLoc Loc,
+                                 StringRef Name, Expr *E,
+                                 Decl *D);
+  void actOnPointerTypeDeclaration(DeclList &Decls,
+                                   SMLoc Loc,
+                                   StringRef Name, Decl *D);
+  void actOnFieldDeclaration(FieldList &Fields,
+                             IdentList &Ids, Decl *D);
+  void actOnRecordTypeDeclaration(DeclList &Decls,
+                                  SMLoc Loc, StringRef Name,
+                                  const FieldList &Fields);
   void actOnVariableDeclaration(DeclList &Decls,
                                 IdentList &Ids, Decl *D);
   void
@@ -63,7 +76,7 @@ public:
   void actOnProcedureDeclaration(
       ProcedureDeclaration *ProcDecl, SMLoc Loc,
       StringRef Name, DeclList &Decls, StmtList &Stmts);
-  void actOnAssignment(StmtList &Stmts, SMLoc Loc, Decl *D,
+  void actOnAssignment(StmtList &Stmts, SMLoc Loc, Expr *D,
                        Expr *E);
   void actOnProcCall(StmtList &Stmts, SMLoc Loc, Decl *D,
                      ExprList &Params);
@@ -85,7 +98,10 @@ public:
   Expr *actOnPrefixExpression(Expr *E,
                               const OperatorInfo &Op);
   Expr *actOnIntegerLiteral(SMLoc Loc, StringRef Literal);
-  Expr *actOnVariable(Decl *D);
+  void actOnIndexSelector(Expr *Desig, SMLoc Loc, Expr *E);
+  void actOnFieldSelector(Expr *Desig, SMLoc Loc, StringRef Name);
+  void actOnDereferenceSelector(Expr *Desig, SMLoc Loc);
+  Expr *actOnDesignator(Decl *D);
   Expr *actOnFunctionCall(Decl *D, ExprList &Params);
   Decl *actOnQualIdentPart(Decl *Prev, SMLoc Loc,
                            StringRef Name);

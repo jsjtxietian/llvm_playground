@@ -14,33 +14,43 @@ namespace tinylang {
 class Decl;
 class FormalParameterDeclaration;
 class Expr;
+class Selector;
 class Stmt;
+class TypeDeclaration;
 
 using DeclList = std::vector<Decl *>;
 using FormalParamList =
     std::vector<FormalParameterDeclaration *>;
 using ExprList = std::vector<Expr *>;
+using SelectorList = std::vector<Selector *>;
 using StmtList = std::vector<Stmt *>;
+using IdentList = std::vector<std::pair<SMLoc, StringRef>>;
 
-class Ident {
+class Field {
   SMLoc Loc;
   StringRef Name;
+  TypeDeclaration *Type;
 
 public:
-  Ident(SMLoc Loc, const StringRef &Name)
-      : Loc(Loc), Name(Name) {}
-  SMLoc getLocation() { return Loc; }
-  const StringRef &getName() { return Name; }
+  Field(SMLoc Loc, const StringRef &Name,
+        TypeDeclaration *Type)
+      : Loc(Loc), Name(Name), Type(Type) {}
+  SMLoc getLoc() const { return Loc; }
+  const StringRef &getName() const { return Name; }
+  TypeDeclaration *getType() const { return Type; }
 };
-
-using IdentList = std::vector<std::pair<SMLoc, StringRef>>;
+using FieldList = std::vector<Field>;
 
 class Decl {
 public:
   enum DeclKind {
     DK_Module,
     DK_Const,
-    DK_Type,
+    DK_AliasType,
+    DK_ArrayType,
+    DK_PervasiveType,
+    DK_PointerType,
+    DK_RecordType,
     DK_Var,
     DK_Param,
     DK_Proc
@@ -107,13 +117,101 @@ public:
 };
 
 class TypeDeclaration : public Decl {
+protected:
+  TypeDeclaration(DeclKind Kind, Decl *EnclosingDecL,
+                  SMLoc Loc, StringRef Name)
+      : Decl(Kind, EnclosingDecL, Loc, Name) {}
+
 public:
-  TypeDeclaration(Decl *EnclosingDecL, SMLoc Loc,
-                  StringRef Name)
-      : Decl(DK_Type, EnclosingDecL, Loc, Name) {}
+  static bool classof(const Decl *D) {
+    return D->getKind() >= DK_AliasType &&
+           D->getKind() <= DK_RecordType;
+  }
+};
+
+class AliasTypeDeclaration : public TypeDeclaration {
+  TypeDeclaration *Type;
+
+public:
+  AliasTypeDeclaration(Decl *EnclosingDecL, SMLoc Loc,
+                       StringRef Name,
+                       TypeDeclaration *Type)
+      : TypeDeclaration(DK_AliasType, EnclosingDecL, Loc,
+                        Name),
+        Type(Type) {}
+
+  TypeDeclaration *getType() const { return Type; }
 
   static bool classof(const Decl *D) {
-    return D->getKind() == DK_Type;
+    return D->getKind() == DK_AliasType;
+  }
+};
+
+class ArrayTypeDeclaration : public TypeDeclaration {
+  Expr *Nums;
+  TypeDeclaration *Type;
+
+public:
+  ArrayTypeDeclaration(Decl *EnclosingDecL, SMLoc Loc,
+                       StringRef Name, Expr *Nums,
+                       TypeDeclaration *Type)
+      : TypeDeclaration(DK_ArrayType, EnclosingDecL, Loc,
+                        Name),
+        Nums(Nums), Type(Type) {}
+
+  Expr *getNums() const { return Nums; }
+  TypeDeclaration *getType() const { return Type; }
+
+  static bool classof(const Decl *D) {
+    return D->getKind() == DK_ArrayType;
+  }
+};
+
+class PervasiveTypeDeclaration : public TypeDeclaration {
+public:
+  PervasiveTypeDeclaration(Decl *EnclosingDecL, SMLoc Loc,
+                           StringRef Name)
+      : TypeDeclaration(DK_PervasiveType, EnclosingDecL,
+                        Loc, Name) {}
+
+  static bool classof(const Decl *D) {
+    return D->getKind() == DK_PervasiveType;
+  }
+};
+
+class PointerTypeDeclaration : public TypeDeclaration {
+  TypeDeclaration *Type;
+
+public:
+  PointerTypeDeclaration(Decl *EnclosingDecL, SMLoc Loc,
+                         StringRef Name,
+                         TypeDeclaration *Type)
+      : TypeDeclaration(DK_PointerType, EnclosingDecL, Loc,
+                        Name),
+        Type(Type) {}
+
+  TypeDeclaration *getType() const { return Type; }
+
+  static bool classof(const Decl *D) {
+    return D->getKind() == DK_PointerType;
+  }
+};
+
+class RecordTypeDeclaration : public TypeDeclaration {
+  FieldList Fields;
+
+public:
+  RecordTypeDeclaration(Decl *EnclosingDecL, SMLoc Loc,
+                        StringRef Name,
+                        const FieldList &Fields)
+      : TypeDeclaration(DK_RecordType, EnclosingDecL, Loc,
+                        Name),
+        Fields(Fields) {}
+
+  const FieldList &getFields() const { return Fields; }
+
+  static bool classof(const Decl *D) {
+    return D->getKind() == DK_RecordType;
   }
 };
 
@@ -144,8 +242,8 @@ public:
       : Decl(DK_Param, EnclosingDecL, Loc, Name), Ty(Ty),
         IsVar(IsVar) {}
 
-  TypeDeclaration *getType() { return Ty; }
-  bool isVar() { return IsVar; }
+  TypeDeclaration *getType() const { return Ty; }
+  bool isVar() const { return IsVar; }
 
   static bool classof(const Decl *D) {
     return D->getKind() == DK_Param;
@@ -216,7 +314,7 @@ public:
     EK_Prefix,
     EK_Int,
     EK_Bool,
-    EK_Var,
+    EK_Designator,
     EK_Const,
     EK_Func,
   };
@@ -302,19 +400,96 @@ public:
   }
 };
 
-class VariableAccess : public Expr {
-  Decl *Var;
+class Selector {
+public:
+  enum SelectorKind {
+    SK_Index,
+    SK_Field,
+    SK_Dereference,
+  };
+
+private:
+  const SelectorKind Kind;
+
+  // The type decribes the base type.
+  // E.g. the component type of an index selector
+  TypeDeclaration *Type;
+
+protected:
+  Selector(SelectorKind Kind, TypeDeclaration *Type)
+      : Kind(Kind), Type(Type) {}
 
 public:
-  VariableAccess(VariableDeclaration *Var)
-      : Expr(EK_Var, Var->getType(), false), Var(Var) {}
-  VariableAccess(FormalParameterDeclaration *Param)
-      : Expr(EK_Var, Param->getType(), false), Var(Param) {}
+  SelectorKind getKind() const { return Kind; }
+  TypeDeclaration *getType() const { return Type; }
+};
+
+class IndexSelector : public Selector {
+  Expr *Index;
+
+public:
+  IndexSelector(Expr *Index, TypeDeclaration *Type)
+      : Selector(SK_Index, Type), Index(Index) {}
+
+  Expr *getIndex() const { return Index; }
+
+  static bool classof(const Selector *Sel) {
+    return Sel->getKind() == SK_Index;
+  }
+};
+
+class FieldSelector : public Selector {
+  uint32_t Index;
+  StringRef Name;
+
+public:
+  FieldSelector(uint32_t Index, StringRef Name,
+                TypeDeclaration *Type)
+      : Selector(SK_Field, Type), Index(Index), Name(Name) {
+  }
+
+  uint32_t getIndex() const { return Index; }
+  const StringRef &getname() const { return Name; }
+
+  static bool classof(const Selector *Sel) {
+    return Sel->getKind() == SK_Field;
+  }
+};
+
+class DereferenceSelector : public Selector {
+public:
+  DereferenceSelector(TypeDeclaration *Type)
+      : Selector(SK_Dereference, Type) {}
+
+  static bool classof(const Selector *Sel) {
+    return Sel->getKind() == SK_Dereference;
+  }
+};
+
+class Designator : public Expr {
+  Decl *Var;
+  SelectorList Selectors;
+
+public:
+  Designator(VariableDeclaration *Var)
+      : Expr(EK_Designator, Var->getType(), false),
+        Var(Var) {}
+  Designator(FormalParameterDeclaration *Param)
+      : Expr(EK_Designator, Param->getType(), false),
+        Var(Param) {}
+
+  void addSelector(Selector *Sel) {
+    Selectors.push_back(Sel);
+    setType(Sel->getType());
+  }
 
   Decl *getDecl() { return Var; }
+  const SelectorList &getSelectors() const {
+    return Selectors;
+  }
 
   static bool classof(const Expr *E) {
-    return E->getKind() == EK_Var;
+    return E->getKind() == EK_Designator;
   }
 };
 
@@ -372,14 +547,14 @@ public:
 };
 
 class AssignmentStatement : public Stmt {
-  VariableDeclaration *Var;
+  Designator *Var;
   Expr *E;
 
 public:
-  AssignmentStatement(VariableDeclaration *Var, Expr *E)
+  AssignmentStatement(Designator *Var, Expr *E)
       : Stmt(SK_Assign), Var(Var), E(E) {}
 
-  VariableDeclaration *getVar() { return Var; }
+  Designator *getVar() { return Var; }
   Expr *getExpr() { return E; }
 
   static bool classof(const Stmt *S) {

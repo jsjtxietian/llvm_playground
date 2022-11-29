@@ -2,16 +2,14 @@
 #include "tinylang/Basic/Version.h"
 #include "tinylang/CodeGen/CodeGenerator.h"
 #include "tinylang/Parser/Parser.h"
-// adds common command-line options to our compiler driver
 #include "llvm/CodeGen/CommandFlags.h"
-// holding the passes to emit code to a file
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LegacyPassManager.h"
-#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/WithColor.h"
@@ -25,15 +23,14 @@ static llvm::cl::list<std::string>
     InputFiles(llvm::cl::Positional,
                llvm::cl::desc("<input-files>"));
 
-static llvm::cl::opt<std::string> MTriple(
-    "mtriple",
-    llvm::cl::desc("Override target triple for module"));
+static llvm::cl::opt<std::string>
+    MTriple("mtriple",
+            llvm::cl::desc("Override target triple for module"));
 
-// command-line option for outputting LLVM IR
-static llvm::cl::opt<bool> EmitLLVM(
-    "emit-llvm",
-    llvm::cl::desc("Emit IR code instead of assembler"),
-    llvm::cl::init(false));
+static llvm::cl::opt<bool>
+    EmitLLVM("emit-llvm",
+             llvm::cl::desc("Emit IR code instead of assembler"),
+             llvm::cl::init(false));
 
 static const char *Head = "tinylang - Tinylang compiler";
 
@@ -50,12 +47,8 @@ void printVersion(llvm::raw_ostream &OS) {
   exit(EXIT_SUCCESS);
 }
 
-// For the purpose of displaying error messages, the name of
-// the application must be passed to the function
 llvm::TargetMachine *
 createTargetMachine(const char *Argv0) {
-  // collect all the information provided by the command
-  // line
   llvm::Triple Triple = llvm::Triple(
       !MTriple.empty()
           ? llvm::Triple::normalize(MTriple)
@@ -66,29 +59,25 @@ createTargetMachine(const char *Argv0) {
   std::string CPUStr = codegen::getCPUStr();
   std::string FeatureStr = codegen::getFeaturesStr();
 
-  // look up the target in the target registry.
   std::string Error;
   const llvm::Target *Target =
-      llvm::TargetRegistry::lookupTarget(
-          codegen::getMArch(), Triple, Error);
+      llvm::TargetRegistry::lookupTarget(codegen::getMArch(), Triple,
+                                         Error);
 
   if (!Target) {
     llvm::WithColor::error(llvm::errs(), Argv0) << Error;
     return nullptr;
   }
 
-  // configure the target machine
   llvm::TargetMachine *TM = Target->createTargetMachine(
       Triple.getTriple(), CPUStr, FeatureStr, TargetOptions,
-      llvm::Optional<llvm::Reloc::Model>(
-          codegen::getRelocModel()));
+      llvm::Optional<llvm::Reloc::Model>(codegen::getRelocModel()));
   return TM;
 }
 
 bool emit(StringRef Argv0, llvm::Module *M,
           llvm::TargetMachine *TM,
           StringRef InputFilename) {
-  // llvm/CodeGen/CommandFlags.inc
   CodeGenFileType FileType = codegen::getFileType();
   std::string OutputFilename;
   if (InputFilename == "-") {
@@ -115,19 +104,15 @@ bool emit(StringRef Argv0, llvm::Module *M,
   // Open the file.
   std::error_code EC;
   sys::fs::OpenFlags OpenFlags = sys::fs::OF_None;
-  // Some platforms distinguish between text and binary
-  // files
   if (FileType == CGFT_AssemblyFile)
     OpenFlags |= sys::fs::OF_Text;
   auto Out = std::make_unique<llvm::ToolOutputFile>(
       OutputFilename, EC, OpenFlags);
   if (EC) {
-    WithColor::error(llvm::errs(), Argv0)
-        << EC.message() << '\n';
+    WithColor::error(llvm::errs(), Argv0) << EC.message() << '\n';
     return false;
   }
 
-  // add the required passes to PassManager
   legacy::PassManager PM;
   if (FileType == CGFT_AssemblyFile && EmitLLVM) {
     PM.add(createPrintModulePass(Out->os()));
@@ -139,8 +124,6 @@ bool emit(StringRef Argv0, llvm::Module *M,
     }
   }
   PM.run(*M);
-  // The ToolOutputFile class automatically deletes the file
-  // if we do not explicitly request that we want to keep it
   Out->keep();
   return true;
 }
@@ -157,8 +140,7 @@ int main(int Argc, const char **Argv) {
   llvm::cl::ParseCommandLineOptions(Argc, Argv, Head);
 
   if (codegen::getMCPU() == "help" ||
-      std::any_of(codegen::getMAttrs().begin(),
-                  codegen::getMAttrs().end(),
+      std::any_of(codegen::getMAttrs().begin(), codegen::getMAttrs().end(),
                   [](const std::string &a) {
                     return a == "help";
                   })) {
@@ -170,9 +152,9 @@ int main(int Argc, const char **Argv) {
                    << ". ";
       // this prints the available CPUs and features of the
       // target to stderr...
-      target->createMCSubtargetInfo(
-          Triple.getTriple(), codegen::getCPUStr(),
-          codegen::getFeaturesStr());
+      target->createMCSubtargetInfo(Triple.getTriple(),
+                                    codegen::getCPUStr(),
+                                    codegen::getFeaturesStr());
     } else {
       llvm::errs() << ErrMsg << "\n";
       exit(EXIT_FAILURE);
@@ -203,16 +185,17 @@ int main(int Argc, const char **Argv) {
                               llvm::SMLoc());
 
     auto lexer = Lexer(SrcMgr, Diags);
+    auto ASTCtx = ASTContext(SrcMgr, F);
     auto sema = Sema(Diags);
     auto parser = Parser(lexer, sema);
     auto *Mod = parser.parse();
     if (Mod && !Diags.numErrors()) {
       llvm::LLVMContext Ctx;
       if (CodeGenerator *CG =
-              CodeGenerator::create(Ctx, TM)) {
+              CodeGenerator::create(Ctx, ASTCtx, TM)) {
         std::unique_ptr<llvm::Module> M = CG->run(Mod, F);
         if (!emit(Argv[0], M.get(), TM, F)) {
-          llvm::WithColor::error(llvm::errs(), Argv[0])
+          llvm::WithColor::error(errs(), Argv[0])
               << "Error writing output\n";
         }
         delete CG;

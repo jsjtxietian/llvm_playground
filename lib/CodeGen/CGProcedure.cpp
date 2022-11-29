@@ -1,11 +1,10 @@
 #include "tinylang/CodeGen/CGProcedure.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/Debug.h"
 
 using namespace tinylang;
 
-// store the current value of a local variable in a basic
-// block
 void CGProcedure::writeLocalVariable(llvm::BasicBlock *BB,
                                      Decl *Decl,
                                      llvm::Value *Val) {
@@ -29,8 +28,6 @@ CGProcedure::readLocalVariable(llvm::BasicBlock *BB,
   auto Val = CurrentDef[BB].Defs.find(Decl);
   if (Val != CurrentDef[BB].Defs.end())
     return Val->second;
-  // extend the search to the predecessors using a possible
-  // recursive search
   return readLocalVariableRecursive(BB, Decl);
 }
 
@@ -39,9 +36,6 @@ llvm::Value *CGProcedure::readLocalVariableRecursive(
   llvm::Value *Val = nullptr;
   if (!CurrentDef[BB].Sealed) {
     // Add incomplete phi for variable.
-    // we need to look up the value of the variable not
-    // yet defined in this basic block, then we insert an
-    // empty phi instruction and use it as the value.
     llvm::PHINode *Phi = addEmptyPhi(BB, Decl);
     CurrentDef[BB].IncompletePhis[Phi] = Decl;
     Val = Phi;
@@ -52,16 +46,13 @@ llvm::Value *CGProcedure::readLocalVariableRecursive(
     // Create empty phi instruction to break potential
     // cycles.
     llvm::PHINode *Phi = addEmptyPhi(BB, Decl);
-    Val = Phi;
-    writeLocalVariable(BB, Decl, Val);
-    addPhiOperands(BB, Decl, Phi);
+    writeLocalVariable(BB, Decl, Phi);
+    Val = addPhiOperands(BB, Decl, Phi);
   }
   writeLocalVariable(BB, Decl, Val);
   return Val;
 }
 
-// inserts an empty phi instruction at
-// the beginning of the basic block
 llvm::PHINode *
 CGProcedure::addEmptyPhi(llvm::BasicBlock *BB, Decl *Decl) {
   return BB->empty()
@@ -71,40 +62,28 @@ CGProcedure::addEmptyPhi(llvm::BasicBlock *BB, Decl *Decl) {
                                      &BB->front());
 }
 
-// first search all the predecessors of the basic block and
-// add the operand pair value and basic block to the phi
-// instruction. Then, we try to optimize the instruction:
-void CGProcedure::addPhiOperands(llvm::BasicBlock *BB,
-                                 Decl *Decl,
-                                 llvm::PHINode *Phi) {
+llvm::Value *CGProcedure::addPhiOperands(
+    llvm::BasicBlock *BB, Decl *Decl, llvm::PHINode *Phi) {
   for (auto I = llvm::pred_begin(BB),
             E = llvm::pred_end(BB);
        I != E; ++I) {
     Phi->addIncoming(readLocalVariable(*I, Decl), *I);
   }
-  optimizePhi(Phi);
+  return optimizePhi(Phi);
 }
 
-// If the instruction has only one operand or all operands
-// have the same value, then we replace the instruction with
-// this value. If the instruction has no operand, then we
-// replace the instruction with the special value, Undef.
-// Only if the instruction has two or more distinct operands
-// do we have to keep the instruction:
-void CGProcedure::optimizePhi(llvm::PHINode *Phi) {
+llvm::Value *CGProcedure::optimizePhi(llvm::PHINode *Phi) {
   llvm::Value *Same = nullptr;
   for (llvm::Value *V : Phi->incoming_values()) {
     if (V == Same || V == Phi)
       continue;
     if (Same && V != Same)
-      return;
+      return Phi;
     Same = V;
   }
   if (Same == nullptr)
     Same = llvm::UndefValue::get(Phi->getType());
   // Collect phi instructions using this one.
-  // search for all uses of the value in other phi
-  // instructions and then try to optimize these
   llvm::SmallVector<llvm::PHINode *, 8> CandidatePhis;
   for (llvm::Use &U : Phi->uses()) {
     if (auto *P =
@@ -116,10 +95,9 @@ void CGProcedure::optimizePhi(llvm::PHINode *Phi) {
   Phi->eraseFromParent();
   for (auto *P : CandidatePhis)
     optimizePhi(P);
+  return Same;
 }
 
-// simply add the missing operands to the incomplete phi
-// instructions and set the flag:
 void CGProcedure::sealBlock(llvm::BasicBlock *BB) {
   assert(!CurrentDef[BB].Sealed &&
          "Attempt to seal already sealed block");
@@ -152,18 +130,18 @@ void CGProcedure::writeVariable(llvm::BasicBlock *BB,
     llvm::report_fatal_error("Unsupported declaration");
 }
 
-// A parameter passed by value is treated as a local
-// variable, and a parameter passed by reference is treated
-// as a global variable.
 llvm::Value *CGProcedure::readVariable(llvm::BasicBlock *BB,
-                                       Decl *D) {
+                                       Decl *D,
+                                       bool LoadVal) {
   if (auto *V = llvm::dyn_cast<VariableDeclaration>(D)) {
     if (V->getEnclosingDecl() == Proc)
       return readLocalVariable(BB, D);
     else if (V->getEnclosingDecl() ==
              CGM.getModuleDeclaration()) {
-      return Builder.CreateLoad(mapType(D),
-                                CGM.getGlobal(D));
+      auto *Global = CGM.getGlobal(D);
+      if (!LoadVal)
+        return Global;
+      return Builder.CreateLoad(mapType(D), Global);
     } else
       llvm::report_fatal_error(
           "Nested procedures not yet supported");
@@ -171,6 +149,8 @@ llvm::Value *CGProcedure::readVariable(llvm::BasicBlock *BB,
                  llvm::dyn_cast<FormalParameterDeclaration>(
                      D)) {
     if (FP->isVar()) {
+      if (!LoadVal)
+        return FormalParams[FP];
       return Builder.CreateLoad(
           mapType(FP)->getPointerElementType(),
           FormalParams[FP]);
@@ -180,7 +160,6 @@ llvm::Value *CGProcedure::readVariable(llvm::BasicBlock *BB,
     llvm::report_fatal_error("Unsupported declaration");
 }
 
-// For a formal parameter that passes by reference
 llvm::Type *CGProcedure::mapType(Decl *Decl) {
   if (auto *FP = llvm::dyn_cast<FormalParameterDeclaration>(
           Decl)) {
@@ -194,9 +173,6 @@ llvm::Type *CGProcedure::mapType(Decl *Decl) {
   return CGM.convertType(llvm::cast<TypeDeclaration>(Decl));
 }
 
-// Creating the function type involves mapping the types
-// and then calling the factory method to create the
-// function type
 llvm::FunctionType *CGProcedure::createFunctionType(
     ProcedureDeclaration *Proc) {
   llvm::Type *ResultTy = CGM.VoidTy;
@@ -213,8 +189,6 @@ llvm::FunctionType *CGProcedure::createFunctionType(
                                  /* IsVarArgs */ false);
 }
 
-// associates the function type with the linkage and the
-// mangled name:
 llvm::Function *
 CGProcedure::createFunction(ProcedureDeclaration *Proc,
                             llvm::FunctionType *FTy) {
@@ -230,7 +204,6 @@ CGProcedure::createFunction(ProcedureDeclaration *Proc,
         Proc->getFormalParams()[Idx];
     if (FP->isVar()) {
       llvm::AttrBuilder Attr;
-      // get the storage size of a parameter type
       llvm::TypeSize Sz =
           CGM.getModule()->getDataLayout().getTypeStoreSize(
               CGM.convertType(FP->getType()));
@@ -322,12 +295,57 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
   } else if (auto *Prefix =
                  llvm::dyn_cast<PrefixExpression>(E)) {
     return emitPrefixExpr(Prefix);
-  } else if (auto *Var =
-                 llvm::dyn_cast<VariableAccess>(E)) {
+  } else if (auto *Var = llvm::dyn_cast<Designator>(E)) {
     auto *Decl = Var->getDecl();
-    // With more languages features in place, here you need
-    // to add array and record support.
-    return readVariable(Curr, Decl);
+    llvm::Value *Val = readVariable(Curr, Decl);
+    // With more languages features in place, here you
+    // need to add array and record support.
+    auto &Selectors = Var->getSelectors();
+    for (auto I = Selectors.begin(), E = Selectors.end();
+         I != E;
+         /* no increment */) {
+      if (auto *IdxSel =
+              llvm::dyn_cast<IndexSelector>(*I)) {
+        llvm::SmallVector<llvm::Value *, 4> IdxList;
+        while (I != E) {
+          if (auto *Sel =
+                  llvm::dyn_cast<IndexSelector>(*I)) {
+            IdxList.push_back(emitExpr(Sel->getIndex()));
+            ++I;
+          } else
+            break;
+        }
+        Val = Builder.CreateInBoundsGEP(Val, IdxList);
+        Val = Builder.CreateLoad(
+            Val->getType()->getPointerElementType(), Val);
+      } else if (auto *FieldSel =
+                     llvm::dyn_cast<FieldSelector>(*I)) {
+        llvm::SmallVector<llvm::Value *, 4> IdxList;
+        while (I != E) {
+          if (auto *Sel =
+                  llvm::dyn_cast<FieldSelector>(*I)) {
+            llvm::Value *V = llvm::ConstantInt::get(
+                CGM.Int64Ty, Sel->getIndex());
+            IdxList.push_back(V);
+            ++I;
+          } else
+            break;
+        }
+        Val = Builder.CreateInBoundsGEP(Val, IdxList);
+        Val = Builder.CreateLoad(
+            Val->getType()->getPointerElementType(), Val);
+      } else if (auto *DerefSel =
+                     llvm::dyn_cast<DereferenceSelector>(
+                         *I)) {
+        Val = Builder.CreateLoad(
+            Val->getType()->getPointerElementType(), Val);
+        ++I;
+      } else {
+        llvm::report_fatal_error("Unsupported selector");
+      }
+    }
+
+    return Val;
   } else if (auto *Const =
                  llvm::dyn_cast<ConstantAccess>(E)) {
     return emitExpr(Const->getDecl()->getExpr());
@@ -345,7 +363,41 @@ llvm::Value *CGProcedure::emitExpr(Expr *E) {
 
 void CGProcedure::emitStmt(AssignmentStatement *Stmt) {
   auto *Val = emitExpr(Stmt->getExpr());
-  writeVariable(Curr, Stmt->getVar(), Val);
+  Designator *Desig = Stmt->getVar();
+  auto &Selectors = Desig->getSelectors();
+  if (Selectors.empty())
+    writeVariable(Curr, Desig->getDecl(), Val);
+  else {
+    llvm::SmallVector<llvm::Value *, 4> IdxList;
+    // First index for GEP.
+    IdxList.push_back(
+        llvm::ConstantInt::get(CGM.Int32Ty, 0));
+    auto *Base =
+        readVariable(Curr, Desig->getDecl(), false);
+    for (auto I = Selectors.begin(), E = Selectors.end();
+         I != E; ++I) {
+      if (auto *IdxSel =
+              llvm::dyn_cast<IndexSelector>(*I)) {
+        IdxList.push_back(emitExpr(IdxSel->getIndex()));
+      } else if (auto *FieldSel =
+                     llvm::dyn_cast<FieldSelector>(*I)) {
+        llvm::Value *V = llvm::ConstantInt::get(
+            CGM.Int32Ty, FieldSel->getIndex());
+        IdxList.push_back(V);
+      } else {
+        llvm::report_fatal_error("not implemented");
+      }
+    }
+    if (!IdxList.empty()) {
+      if (Base->getType()->isPointerTy()) {
+        Base = Builder.CreateInBoundsGEP(Base, IdxList);
+        Builder.CreateStore(Val, Base);
+      }
+      else {
+        llvm::report_fatal_error("should not happen");
+      }
+    }
+  }
 }
 
 void CGProcedure::emitStmt(ProcedureCallStatement *Stmt) {
@@ -356,14 +408,11 @@ void CGProcedure::emitStmt(IfStatement *Stmt) {
   bool HasElse = Stmt->getElseStmts().size() > 0;
 
   // Create the required basic blocks.
-  llvm::BasicBlock *IfBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "if.body", Fn);
+  llvm::BasicBlock *IfBB = createBasicBlock("if.body");
   llvm::BasicBlock *ElseBB =
-      HasElse ? llvm::BasicBlock::Create(CGM.getLLVMCtx(),
-                                         "else.body", Fn)
-              : nullptr;
-  llvm::BasicBlock *AfterIfBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "after.if", Fn);
+      HasElse ? createBasicBlock("else.body") : nullptr;
+  llvm::BasicBlock *AfterIfBB =
+      createBasicBlock("after.if");
 
   llvm::Value *Cond = emitExpr(Stmt->getCond());
   Builder.CreateCondBr(Cond, IfBB,
@@ -390,35 +439,33 @@ void CGProcedure::emitStmt(IfStatement *Stmt) {
 
 void CGProcedure::emitStmt(WhileStatement *Stmt) {
   // The basic block for the condition.
-  // The Fn variable denotes the current function
-  llvm::BasicBlock *WhileCondBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "while.cond", Fn);
+  llvm::BasicBlock *WhileCondBB;
   // The basic block for the while body.
-  llvm::BasicBlock *WhileBodyBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "while.body", Fn);
+  llvm::BasicBlock *WhileBodyBB =
+      createBasicBlock("while.body");
   // The basic block after the while statement.
-  llvm::BasicBlock *AfterWhileBB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "after.while", Fn);
+  llvm::BasicBlock *AfterWhileBB =
+      createBasicBlock("after.while");
 
-  // end the current basic block with a branch to the basic
-  // block, which will hold the condition:
-  Builder.CreateBr(WhileCondBB);
-  sealBlock(Curr);
-  // The basic block for the condition becomes the new
-  // current basic block. We generate the condition and end
-  // the block with a conditional branch:
-  setCurr(WhileCondBB);
+  if (Curr->empty()) {
+    Curr->setName("while.cond");
+    WhileCondBB = Curr;
+  } else {
+    WhileCondBB = createBasicBlock("while.cond");
+    Builder.CreateBr(WhileCondBB);
+    sealBlock(Curr);
+    setCurr(WhileCondBB);
+  }
+
   llvm::Value *Cond = emitExpr(Stmt->getCond());
   Builder.CreateCondBr(Cond, WhileBodyBB, AfterWhileBB);
 
   setCurr(WhileBodyBB);
   emit(Stmt->getWhileStmts());
   Builder.CreateBr(WhileCondBB);
-  sealBlock(Curr);
   sealBlock(WhileCondBB);
+  sealBlock(Curr);
 
-  // The empty basic block for statements following the
-  // WHILE statement becomes the new current basic block
   setCurr(AfterWhileBB);
 }
 
@@ -455,18 +502,9 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
   Fty = createFunctionType(Proc);
   Fn = createFunction(Proc, Fty);
 
-  // create the first basic block of the function and make
-  // it the current one:
-  llvm::BasicBlock *BB = llvm::BasicBlock::Create(
-      CGM.getLLVMCtx(), "entry", Fn);
+  llvm::BasicBlock *BB = createBasicBlock("entry");
   setCurr(BB);
 
-  // step through all formal parameters.
-  // To handle VAR parameters correctly, we need to
-  // initialize the FormalParams member (used in
-  // readVariable()). In contrast to local variables, formal
-  // parameters have a value in the first basic block, so we
-  // make these values known:
   size_t Idx = 0;
   auto &Defs = CurrentDef[BB];
   for (auto I = Fn->arg_begin(), E = Fn->arg_end(); I != E;
@@ -474,11 +512,10 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
     llvm::Argument *Arg = I;
     FormalParameterDeclaration *FP =
         Proc->getFormalParams()[Idx];
-    // Create mapping FormalParameter -> llvm::Argument for
-    // VAR parameters.
+    // Create mapping FormalParameter -> llvm::Argument
+    // for VAR parameters.
     FormalParams[FP] = Arg;
-    Defs.Defs.insert(
-        std::pair<Decl *, llvm::Value *>(FP, Arg));
+    writeLocalVariable(Curr, FP, Arg);
   }
 
   for (auto *D : Proc->getDecls()) {
@@ -487,8 +524,7 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
       llvm::Type *Ty = mapType(Var);
       if (Ty->isAggregateType()) {
         llvm::Value *Val = Builder.CreateAlloca(Ty);
-        Defs.Defs.insert(
-            std::pair<Decl *, llvm::Value *>(Var, Val));
+        writeLocalVariable(Curr, Var, Val);
       }
     }
   }
@@ -498,8 +534,6 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
   if (!Curr->getTerminator()) {
     Builder.CreateRetVoid();
   }
-  // The last block after generating the IR code may not yet
-  // be sealed
   sealBlock(Curr);
 }
 

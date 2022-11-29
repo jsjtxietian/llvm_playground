@@ -1,8 +1,18 @@
 #include "tinylang/CodeGen/CGModule.h"
 #include "tinylang/CodeGen/CGProcedure.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace tinylang;
+
+static llvm::cl::opt<bool>
+    Debug("g", llvm::cl::desc("Generate debug information"),
+          llvm::cl::init(false));
+
+CGModule::CGModule(ASTContext &ASTCtx, llvm::Module *M)
+    : ASTCtx(ASTCtx), M(M) {
+  initialize();
+}
 
 void CGModule::initialize() {
   VoidTy = llvm::Type::getVoidTy(getLLVMCtx());
@@ -14,14 +24,40 @@ void CGModule::initialize() {
 }
 
 llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
-  if (Ty->getName() == "INTEGER")
-    return Int64Ty;
-  if (Ty->getName() == "BOOLEAN")
-    return Int1Ty;
+  if (llvm::Type *T = TypeCache[Ty])
+    return T;
+
+  if (llvm::isa<PervasiveTypeDeclaration>(Ty)) {
+    if (Ty->getName() == "INTEGER")
+      return Int64Ty;
+    if (Ty->getName() == "BOOLEAN")
+      return Int1Ty;
+  } else if (auto *AliasTy =
+                 llvm::dyn_cast<AliasTypeDeclaration>(Ty)) {
+    llvm::Type *T = convertType(AliasTy->getType());
+    return TypeCache[Ty] = T;
+  } else if (auto *ArrayTy =
+                 llvm::dyn_cast<ArrayTypeDeclaration>(Ty)) {
+    llvm::Type *Component = convertType(ArrayTy->getType());
+    Expr *Nums = ArrayTy->getNums();
+    uint64_t NumElements = 5; // TODO Eval Nums
+    llvm::Type *T =
+        llvm::ArrayType::get(Component, NumElements);
+    return TypeCache[Ty] = T;
+  } else if (auto *RecordTy =
+                 llvm ::dyn_cast<RecordTypeDeclaration>(
+                     Ty)) {
+    llvm::SmallVector<llvm::Type *, 4> Elements;
+    for (const auto &F : RecordTy->getFields()) {
+      Elements.push_back(convertType(F.getType()));
+    }
+    llvm::Type *T = llvm::StructType::create(
+        Elements, RecordTy->getName(), false);
+    return TypeCache[Ty] = T;
+  }
   llvm::report_fatal_error("Unsupported type");
 }
 
-// Square.Root => _t6Square4Root
 std::string CGModule::mangleName(Decl *D) {
   std::string Mangled;
   llvm::SmallString<16> Tmp;
@@ -41,9 +77,8 @@ llvm::GlobalObject *CGModule::getGlobal(Decl *D) {
   return Globals[D];
 }
 
-// A global variable in tinylang is mapped to
-// an instance of the llvm::GobalValue class
 void CGModule::run(ModuleDeclaration *Mod) {
+  this->Mod = Mod;
   for (auto *Decl : Mod->getDecls()) {
     if (auto *Var =
             llvm::dyn_cast<VariableDeclaration>(Decl)) {
