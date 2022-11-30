@@ -23,6 +23,7 @@ void CGModule::initialize() {
       llvm::ConstantInt::get(Int32Ty, 0, /*isSigned*/ true);
 }
 
+// be extended to create the type
 llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
   if (llvm::Type *T = TypeCache[Ty])
     return T;
