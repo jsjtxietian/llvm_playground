@@ -10,7 +10,7 @@ static llvm::cl::opt<bool>
           llvm::cl::init(false));
 
 CGModule::CGModule(ASTContext &ASTCtx, llvm::Module *M)
-    : ASTCtx(ASTCtx), M(M) {
+    : ASTCtx(ASTCtx), M(M), TBAA(CGTBAA(*this)) {
   initialize();
 }
 
@@ -21,9 +21,10 @@ void CGModule::initialize() {
   Int64Ty = llvm::Type::getInt64Ty(getLLVMCtx());
   Int32Zero =
       llvm::ConstantInt::get(Int32Ty, 0, /*isSigned*/ true);
+  if (Debug)
+    DebugInfo.reset(new CGDebugInfo(*this));
 }
 
-// be extended to create the type
 llvm::Type *CGModule::convertType(TypeDeclaration *Ty) {
   if (llvm::Type *T = TypeCache[Ty])
     return T;
@@ -74,8 +75,20 @@ std::string CGModule::mangleName(Decl *D) {
   return Mangled;
 }
 
+void CGModule::decorateInst(llvm::Instruction *Inst,
+                            TypeDeclaration *Type) {
+  if (auto *N = TBAA.getAccessTagInfo(Type))
+    Inst->setMetadata(llvm::LLVMContext::MD_tbaa, N);
+}
+
 llvm::GlobalObject *CGModule::getGlobal(Decl *D) {
   return Globals[D];
+}
+
+void CGModule::applyLocation(llvm::Instruction *Inst,
+                             llvm::SMLoc Loc) {
+  if (CGDebugInfo *Dbg = getDbgInfo())
+    Inst->setDebugLoc(Dbg->getDebugLoc(Loc));
 }
 
 void CGModule::run(ModuleDeclaration *Mod) {
@@ -90,6 +103,8 @@ void CGModule::run(ModuleDeclaration *Mod) {
           llvm::GlobalValue::PrivateLinkage, nullptr,
           mangleName(Var));
       Globals[Var] = V;
+      if (CGDebugInfo *Dbg = getDbgInfo())
+        Dbg->emitGlobalVariable(Var, V);
     } else if (auto *Proc =
                    llvm::dyn_cast<ProcedureDeclaration>(
                        Decl)) {
@@ -97,4 +112,6 @@ void CGModule::run(ModuleDeclaration *Mod) {
       CGP.run(Proc);
     }
   }
+  if (CGDebugInfo *Dbg = getDbgInfo())
+    Dbg->finalize();
 }

@@ -1,7 +1,6 @@
 #include "tinylang/CodeGen/CGProcedure.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/Debug.h"
 
 using namespace tinylang;
 
@@ -501,6 +500,8 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
   this->Proc = Proc;
   Fty = createFunctionType(Proc);
   Fn = createFunction(Proc, Fty);
+  if (CGDebugInfo *Dbg = CGM.getDbgInfo())
+    Dbg->emitProcedure(Proc, Fn);
 
   llvm::BasicBlock *BB = createBasicBlock("entry");
   setCurr(BB);
@@ -516,6 +517,9 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
     // for VAR parameters.
     FormalParams[FP] = Arg;
     writeLocalVariable(Curr, FP, Arg);
+    if (CGDebugInfo *Dbg = CGM.getDbgInfo())
+      DIVariables[FP] =
+          Dbg->emitParameterVariable(FP, Idx + 1, Arg, BB);
   }
 
   for (auto *D : Proc->getDecls()) {
@@ -535,6 +539,8 @@ void CGProcedure::run(ProcedureDeclaration *Proc) {
     Builder.CreateRetVoid();
   }
   sealBlock(Curr);
+  if (CGDebugInfo *Dbg = CGM.getDbgInfo())
+    Dbg->emitProcedureEnd(Proc, Fn);
 }
 
 void CGProcedure::run() {}
