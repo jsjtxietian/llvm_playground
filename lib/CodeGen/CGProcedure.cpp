@@ -393,7 +393,8 @@ void CGProcedure::emitStmt(AssignmentStatement *Stmt) {
         Builder.CreateStore(Val, Base);
       }
       else {
-        llvm::report_fatal_error("should not happen");
+        llvm::report_fatal_error("not implemented");
+        //Builder.CreateInsertValue(Base, Val, IdxList);
       }
     }
   }

@@ -33,11 +33,12 @@ class Parser {
         tok::getPunctuatorSpelling(ExpectedTok);
     if (!Expected)
       Expected = tok::getKeywordSpelling(ExpectedTok);
-    llvm::StringRef Actual(Tok.getLocation().getPointer(),
-                           Tok.getLength());
+    llvm::StringRef Actual(
+        Tok.getLocation().getPointer(),
+        Tok.getLength());
     getDiagnostics().report(Tok.getLocation(),
-                            diag::err_expected, Expected,
-                            Actual);
+                            diag::err_expected,
+                            Expected, Actual);
     return true;
   }
 
@@ -61,7 +62,8 @@ class Parser {
   bool parseProcedureDeclaration(DeclList &ParentDecls);
   bool parseFormalParameters(FormalParamList &Params,
                              Decl *&RetType);
-  bool parseFormalParameterList(FormalParamList &Params);
+  bool
+  parseFormalParameterList(FormalParamList &Params);
   bool parseFormalParameter(FormalParamList &Params);
   bool parseStatementSequence(StmtList &Stmts);
   bool parseStatement(StmtList &Stmts);
