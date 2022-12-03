@@ -1,7 +1,7 @@
 ﻿cmake_minimum_required (VERSION 3.13.4)
 
 project ("jit")
-
+set(CMAKE_CXX_STANDARD 20)
 find_package(LLVM REQUIRED CONFIG)
 list(APPEND CMAKE_MODULE_PATH ${LLVM_DIR})
 include(DetermineGCCCompatible)
